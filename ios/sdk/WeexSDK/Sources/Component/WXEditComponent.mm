@@ -28,8 +28,12 @@
 #import "WXComponent+PseudoClassManagement.h"
 #import "WXTextInputComponent.h"
 #import "WXComponent+Layout.h"
+#import "WXComponent_internal.h"
 
 @interface WXEditComponent()
+{
+    CGFloat _upriseOffset; // additional space when edit is lifted by keyboard
+}
 
 //@property (nonatomic, strong) WXTextInputView *inputView;
 @property (nonatomic, strong) WXDatePickerManager *datePickerManager;
@@ -38,7 +42,7 @@
 @property (nonatomic) NSNumber *maxLength;
 @property (nonatomic) NSString * value;
 @property (nonatomic) BOOL autofocus;
-@property(nonatomic) UIReturnKeyType returnKeyType;
+@property (nonatomic) UIReturnKeyType returnKeyType;
 @property (nonatomic) BOOL disabled;
 @property (nonatomic, copy) NSString *inputType;
 @property (nonatomic) NSUInteger rows;
@@ -49,7 +53,9 @@
 @property (nonatomic) WXTextStyle fontStyle;
 @property (nonatomic) CGFloat fontWeight;
 @property (nonatomic, strong) NSString *fontFamily;
-@property (nonatomic, strong) UIColor *colorForStyle;
+@property (atomic, strong) UIColor *colorForStyle;
+@property (atomic, strong) UIColor *darkSchemeColorForStyle;
+@property (atomic, strong) UIColor *lightSchemeColorForStyle;
 @property (nonatomic)NSTextAlignment textAlignForStyle;
 
 //event
@@ -102,11 +108,18 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         _clickEvent = NO;
         _keyboardEvent = NO;
         _keyboardHidden = YES;
+        _textAlignForStyle = NSTextAlignmentNatural;
         // handle attributes
         _autofocus = [attributes[@"autofocus"] boolValue];
         _disabled = [attributes[@"disabled"] boolValue];
         _value = [WXConvert NSString:attributes[@"value"]]?:@"";
         _placeholderString = [WXConvert NSString:attributes[@"placeholder"]]?:@"";
+        _upriseOffset = 20; // 20 for better appearance
+        
+        if (attributes[@"upriseOffset"]) {
+            _upriseOffset = [WXConvert CGFloat:attributes[@"upriseOffset"]];
+        }
+        
         if(attributes[@"type"]) {
             _inputType = [WXConvert NSString:attributes[@"type"]];
             _attr = attributes;
@@ -132,7 +145,16 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         
         // handle styles
         if (styles[@"color"]) {
-            _colorForStyle = [WXConvert UIColor:styles[@"color"]];
+            self.colorForStyle = [WXConvert UIColor:styles[@"color"]];
+        }
+        else {
+            self.colorForStyle = [UIColor blackColor];
+        }
+        if (styles[@"weexDarkSchemeColor"]) {
+            self.darkSchemeColorForStyle = [WXConvert UIColor:styles[@"weexDarkSchemeColor"]];
+        }
+        if (styles[@"weexLightSchemeColor"]) {
+            self.lightSchemeColorForStyle = [WXConvert UIColor:styles[@"weexLightSchemeColor"]];
         }
         if (styles[@"fontSize"]) {
             _fontSize = [WXConvert WXPixelType:styles[@"fontSize"] scaleFactor:self.weexInstance.pixelScaleFactor];
@@ -150,9 +172,15 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
             _textAlignForStyle = [WXConvert NSTextAlignment:styles[@"textAlign"]];
         }
         if (styles[@"placeholderColor"]) {
-            _placeholderColor = [WXConvert UIColor:styles[@"placeholderColor"]];
+            self.placeholderColor = [WXConvert UIColor:styles[@"placeholderColor"]];
         }else {
-            _placeholderColor = [UIColor colorWithRed:0x99/255.0 green:0x99/255.0 blue:0x99/255.0 alpha:1.0];
+            self.placeholderColor = [UIColor colorWithRed:0x99/255.0 green:0x99/255.0 blue:0x99/255.0 alpha:1.0];
+        }
+        if (styles[@"weexDarkSchemePlaceholderColor"]) {
+            self.darkSchemePlaceholderColor = [WXConvert UIColor:styles[@"weexDarkSchemePlaceholderColor"]];
+        }
+        if (styles[@"weexLightSchemePlaceholderColor"]) {
+            self.lightSchemePlaceholderColor = [WXConvert UIColor:styles[@"weexLightSchemePlaceholderColor"]];
         }
     }
     
@@ -176,8 +204,8 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
     [self setAutofocus:_autofocus];
     [self setTextFont];
     [self setPlaceholderAttributedString];
-    [self setTextAlignment:_textAlignForStyle];
-    [self setTextColor:_colorForStyle];
+    [self setTextAlignment];
+    [self setTextColor:[self.weexInstance chooseColor:self.colorForStyle lightSchemeColor:self.lightSchemeColorForStyle darkSchemeColor:self.darkSchemeColorForStyle invert:self.invertForDarkScheme scene:WXColorSceneText]];
     [self setText:_value];
     [self setEnabled:!_disabled];
     [self setRows:_rows];
@@ -214,10 +242,15 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
+- (void)layoutDirectionDidChanged:(BOOL)isRTL {
+    [self setTextAlignment];
+}
+
 -(void)focus
 {
     if(self.view) {
         [self.view becomeFirstResponder];
+        self.weexInstance.apmInstance.forceStopRecordInteractionTime = YES;
     }
 }
 
@@ -285,8 +318,21 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
 {
 }
 
+- (void)_setTextColor
+{
+    [self setTextColor:[self.weexInstance chooseColor:self.colorForStyle lightSchemeColor:self.lightSchemeColorForStyle darkSchemeColor:self.darkSchemeColorForStyle invert:self.invertForDarkScheme scene:WXColorSceneText]];
+}
+
 -(void)setTextColor:(UIColor *)color
 {
+}
+
+- (void)setTextAlignment {
+    if ([self isDirectionRTL] && _textAlignForStyle == NSTextAlignmentNatural) {
+        [self setTextAlignment:NSTextAlignmentRight];
+    } else {
+        [self setTextAlignment:_textAlignForStyle];
+    }
 }
 
 -(void)setTextAlignment:(NSTextAlignment)textAlignForStyle
@@ -447,16 +493,32 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         _rows = 2;
         [self setRows:_rows];
     }
+    if (attributes[@"upriseOffset"]) {
+        _upriseOffset = [WXConvert CGFloat:attributes[@"upriseOffset"]];
+    }
 }
 
 #pragma mark - upate styles
 
 - (void)updateStyles:(NSDictionary *)styles
 {
+    BOOL colorChanged = NO;
     if (styles[@"color"]) {
-        _colorForStyle = [WXConvert UIColor:styles[@"color"]];
-        [self setTextColor:_colorForStyle];
+        self.colorForStyle = [WXConvert UIColor:styles[@"color"]];
+        colorChanged = YES;
     }
+    if (styles[@"weexDarkSchemeColor"]) {
+        self.darkSchemeColorForStyle = [WXConvert UIColor:styles[@"weexDarkSchemeColor"]];
+        colorChanged = YES;
+    }
+    if (styles[@"weexLightSchemeColor"]) {
+        self.lightSchemeColorForStyle = [WXConvert UIColor:styles[@"weexLightSchemeColor"]];
+        colorChanged = YES;
+    }
+    if (colorChanged) {
+        [self _setTextColor];
+    }
+    
     if (styles[@"fontSize"]) {
         _fontSize = [WXConvert WXPixelType:styles[@"fontSize"] scaleFactor:self.weexInstance.pixelScaleFactor];
     }
@@ -475,17 +537,35 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         _textAlignForStyle = [WXConvert NSTextAlignment:styles[@"textAlign"]];
         [self setTextAlignment:_textAlignForStyle] ;
     }
+    
+    BOOL placeholderColorChanged = NO;
     if (styles[@"placeholderColor"]) {
-        _placeholderColor = [WXConvert UIColor:styles[@"placeholderColor"]];
+        self.placeholderColor = [WXConvert UIColor:styles[@"placeholderColor"]];
+        placeholderColorChanged = YES;
     }else {
-        _placeholderColor = [UIColor colorWithRed:0x99/255.0 green:0x99/255.0 blue:0x99/255.0 alpha:1.0];
+        self.placeholderColor = [UIColor colorWithRed:0x99/255.0 green:0x99/255.0 blue:0x99/255.0 alpha:1.0];
     }
-    [self setPlaceholderAttributedString];
+    if (styles[@"weexDarkSchemePlaceholderColor"]) {
+        self.darkSchemePlaceholderColor = [WXConvert UIColor:styles[@"weexDarkSchemePlaceholderColor"]];
+        placeholderColorChanged = YES;
+    }
+    if (styles[@"weexLightSchemePlaceholderColor"]) {
+        self.lightSchemePlaceholderColor = [WXConvert UIColor:styles[@"weexLightSchemePlaceholderColor"]];
+        placeholderColorChanged = YES;
+    }
+    if (placeholderColorChanged && [self.placeHolderLabel.text length] > 0) {
+        [self setPlaceholderAttributedString];
+    }
+    
     [self updatePattern];
 }
 
 -(void)updatePattern
 {
+    if (self.flexCssNode == nullptr) {
+        return;
+    }
+    
         UIEdgeInsets padding_flex = UIEdgeInsetsMake(
                                                      self.flexCssNode->getPaddingTop(),
                                                      self.flexCssNode->getPaddingLeft(),
@@ -499,10 +579,7 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         
         
         UIEdgeInsets border_flex = UIEdgeInsetsMake(self.flexCssNode->getBorderWidthTop(), self.flexCssNode->getBorderWidthLeft(), self.flexCssNode->getBorderWidthBottom(), self.flexCssNode->getBorderWidthRight());
-        
-        
-        
-        
+
         if (!UIEdgeInsetsEqualToEdgeInsets(border_flex, _border)) {
             [self setBorder:border_flex];
         }
@@ -512,22 +589,30 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
 {
     __weak typeof(self) weakSelf = self;
     return ^CGSize (CGSize constrainedSize) {
+        __strong typeof(self) strongSelf = weakSelf;
+        if (strongSelf == nil) {
+            return CGSizeZero;
+        }
+        
+        if (strongSelf.flexCssNode == nullptr) {
+            return CGSizeZero;
+        }
         
         CGSize computedSize = [[[NSString alloc] init]sizeWithAttributes:nil];
-            if (!isnan(weakSelf.flexCssNode->getMinWidth())) {
-                computedSize.width = MAX(computedSize.width, weakSelf.flexCssNode->getMinWidth());
+            if (!isnan(strongSelf.flexCssNode->getMinWidth())) {
+                computedSize.width = MAX(computedSize.width, strongSelf.flexCssNode->getMinWidth());
             }
             
-            if (!isnan(weakSelf.flexCssNode->getMaxWidth())) {
-                computedSize.width = MIN(computedSize.width, weakSelf.flexCssNode->getMaxWidth());
+            if (!isnan(strongSelf.flexCssNode->getMaxWidth())) {
+                computedSize.width = MIN(computedSize.width, strongSelf.flexCssNode->getMaxWidth());
             }
             
-            if (!isnan(weakSelf.flexCssNode->getMinHeight())) {
-                computedSize.height = MAX(computedSize.height, weakSelf.flexCssNode->getMinHeight());
+            if (!isnan(strongSelf.flexCssNode->getMinHeight())) {
+                computedSize.height = MAX(computedSize.height, strongSelf.flexCssNode->getMinHeight());
             }
             
-            if (!isnan(weakSelf.flexCssNode->getMaxHeight())) {
-                computedSize.height = MIN(computedSize.height, weakSelf.flexCssNode->getMaxHeight());
+            if (!isnan(strongSelf.flexCssNode->getMaxHeight())) {
+                computedSize.height = MIN(computedSize.height, strongSelf.flexCssNode->getMaxHeight());
             }
         return (CGSize) {
             WXCeilPixelValue(computedSize.width),
@@ -581,17 +666,16 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         ((WXTextInputView*)textField).deleteWords = FALSE;
         ((WXTextInputView*)textField).editWords = string;
     }
-    
-    if (_maxLength) {
-        NSUInteger oldLength = [textField.text length];
-        NSUInteger replacementLength = [string length];
-        NSUInteger rangeLength = range.length;
-        
-        NSUInteger newLength = oldLength - rangeLength + replacementLength;
-        
-        return newLength <= [_maxLength integerValue] ;
+  
+    if ([_inputType isEqualToString:@"tel"] || [_inputType isEqualToString:@"number"] ) {
+        if (![self isPureInt:string]) {
+            if ([string isEqualToString:@"+"]||[string isEqualToString:@"."]||[string isEqualToString:@"*"]||[string isEqualToString:@"#"]||(string.length == 0 && range.length == 1))
+            {
+                return YES;
+            }
+            return NO;
+        }
     }
-    
     return YES;
 }
 
@@ -641,16 +725,32 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         if (cursorPosition == textField.text.length) {
             adjust = newString.length-oldText.length;
         }
-        if (textField.deleteWords &&[textField.editWords isKindOfClass:[NSString class]] && [_recoverRule isEqualToString:textField.editWords]) {
-            // do nothing
-        } else {
+        if (!textField.deleteWords || ![textField.editWords isKindOfClass:[NSString class]] || ![_recoverRule isEqualToString:textField.editWords]) {
             textField.text = [newString copy];
             UITextPosition * newPosition = [textField positionFromPosition:textField.beginningOfDocument offset:cursorPosition+adjust];
-            
             textField.selectedTextRange = [textField textRangeFromPosition:newPosition toPosition:newPosition];
         }
 
     }
+    
+    if (_maxLength) {
+        NSString *toBeString = textField.text;
+        NSString *language = [[UIApplication sharedApplication] textInputMode].primaryLanguage;
+        if ([language isEqualToString:@"zh-Hans"]) {
+            UITextRange *selectedRange = [textField markedTextRange];
+            UITextPosition *position = [textField positionFromPosition:selectedRange.start offset:0];
+            if (!position) {
+                if (toBeString.length > _maxLength.integerValue) {
+                    textField.text = [toBeString substringToIndex:_maxLength.integerValue];
+                }
+            }
+        } else {
+            if (toBeString.length > _maxLength.integerValue) {
+                textField.text = [toBeString substringToIndex:_maxLength.integerValue];
+            }
+        }
+    }
+
     if (_inputEvent) {
         // bind each other , the key must be attrs
         [self fireEvent:@"input" params:@{@"value":[textField text]} domChanges:@{@"attrs":@{@"value":[textField text]}}];
@@ -664,7 +764,8 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
     CGRect rootViewFrame = rootView.frame;
     CGRect inputFrame = [self.view.superview convertRect:self.view.frame toView:rootView];
     if (movedUp) {
-        CGFloat offset = inputFrame.origin.y-(rootViewFrame.size.height-_keyboardSize.height-inputFrame.size.height) + 20;
+        CGFloat inputOffset = inputFrame.size.height - (rootViewFrame.size.height - inputFrame.origin.y);
+        CGFloat offset = inputFrame.origin.y-(rootViewFrame.size.height-_keyboardSize.height- (inputOffset > 0 ? inputFrame.size.height - inputOffset : inputFrame.size.height)) + _upriseOffset;
         if (offset > 0) {
             rect = (CGRect){
                 .origin.x = 0.f,
@@ -765,10 +866,18 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
     return NO;
 }
 
+- (BOOL)isPureInt:(NSString*)textString
+{
+    int val;
+    NSScanner* scan = [NSScanner scannerWithString:textString];
+    return[scan scanInt:&val] && [scan isAtEnd];
+}
+
 - (void)setPlaceholderAttributedString
 {
+    UIColor* placeholderColor = [self.weexInstance chooseColor:self.placeholderColor lightSchemeColor:self.lightSchemePlaceholderColor darkSchemeColor:self.darkSchemePlaceholderColor invert:self.invertForDarkScheme scene:WXColorSceneText];
     NSMutableAttributedString *attributedString = [[NSMutableAttributedString alloc] initWithString:_placeholderString];
-    [attributedString addAttribute:NSForegroundColorAttributeName value:_placeholderColor range:NSMakeRange(0, _placeholderString.length)];
+    [attributedString addAttribute:NSForegroundColorAttributeName value:placeholderColor range:NSMakeRange(0, _placeholderString.length)];
     UIFont *font = [WXUtility fontWithSize:_fontSize textWeight:_fontWeight textStyle:_fontStyle fontFamily:_fontFamily scaleFactor:self.weexInstance.pixelScaleFactor];
     [self setAttributedPlaceholder:attributedString font:font];
 }
@@ -788,6 +897,7 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         }else
         {
             [self.view becomeFirstResponder];
+             self.weexInstance.apmInstance.forceStopRecordInteractionTime = YES;
         }
     } else {
         if([self isDateType])
@@ -874,8 +984,9 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
     if(![self.view isFirstResponder]) {
         return;
     }
+    
+    CGRect end = [[[notification userInfo] objectForKey:@"UIKeyboardFrameEndUserInfoKey"] CGRectValue];
     if (!_disableMoveViewUp) {
-        CGRect end = [[[notification userInfo] objectForKey:@"UIKeyboardFrameEndUserInfoKey"] CGRectValue];
         _keyboardSize = end.size;
         UIView * rootView = self.weexInstance.rootView;
         CGRect screenRect = [[UIScreen mainScreen] bounds];
@@ -892,7 +1003,7 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
     }
     
     if (_keyboardEvent) {
-        [self fireEvent:@"keyboard" params:@{ @"isShow": @YES }];
+        [self fireEvent:@"keyboard" params:@{ @"isShow": @YES, @"keyboardSize": @(end.size.height / self.weexInstance.pixelScaleFactor) }];
     }
     
     _keyboardHidden = NO;
@@ -907,8 +1018,8 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
         UIView * rootView = self.weexInstance.rootView;
         if (!CGRectEqualToRect(self.weexInstance.frame, rootView.frame)) {
             [self setViewMovedUp:NO];
-            self.weexInstance.isRootViewFrozen = NO;
         }
+        self.weexInstance.isRootViewFrozen = NO;
     }
     if (_keyboardEvent) {
         [self fireEvent:@"keyboard" params:@{ @"isShow": @NO }];
@@ -926,13 +1037,39 @@ WX_EXPORT_METHOD(@selector(setTextFormatter:))
 #pragma mark -reset color
 - (void)resetStyles:(NSArray *)styles
 {
+    BOOL colorChanged = NO;
     if ([styles containsObject:@"color"]) {
-        [self setTextColor:[UIColor blackColor]];
+        self.colorForStyle = [UIColor blackColor];
+        colorChanged = YES;
     }
+    if ([styles containsObject:@"weexDarkSchemeColor"]) {
+        self.darkSchemeColorForStyle = nil;
+        colorChanged = YES;
+    }
+    if ([styles containsObject:@"weexLightSchemeColor"]) {
+        self.lightSchemeColorForStyle = nil;
+        colorChanged = YES;
+    }
+    if (colorChanged) {
+        [self _setTextColor];
+    }
+    
     if ([styles containsObject:@"fontSize"]) {
         _fontSize = WX_TEXT_FONT_SIZE;
         [self setTextFont];
     }
 }
+
+- (void)schemeDidChange:(NSString*)scheme
+{
+    [super schemeDidChange:scheme];
+    if (_view) {
+        [self _setTextColor];
+        if ([self.placeHolderLabel.text length] > 0) {
+            [self setPlaceholderAttributedString];
+        }
+    }
+}
+
 @end
 

@@ -22,6 +22,12 @@
 #import "WXConvert.h"
 #import "WXTransform.h"
 #import "WXTransition.h"
+
+#ifdef __cplusplus
+#import "WXJSASTParser.h"
+#include <vector>
+#endif // __cplusplus
+
 @class WXTouchGestureRecognizer;
 @class WXThreadSafeCounter;
 
@@ -43,8 +49,13 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     /**
      *  View
      */
-    UIColor *_backgroundColor;
+    UIColor *_styleBackgroundColor;
+    UIColor *_darkSchemeBackgroundColor;
+    UIColor *_lightSchemeBackgroundColor;
     NSString *_backgroundImage;
+    NSString *_darkSchemeBackgroundImage;
+    NSString *_lightSchemeBackgroundImage;
+    NSString *_clipRadius;
     WXClipType _clipToBounds;
     UIView *_view;
     CGFloat _opacity;
@@ -52,6 +63,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     WXBoxShadow *_originalBoxShadow;
     WXBoxShadow *_lastBoxShadow;
     WXBoxShadow *_boxShadow;
+    WXBoxShadow *_darkSchemeBoxShadow;
+    WXBoxShadow *_lightSchemeBoxShadow;
     
     /**
      * accessibility support
@@ -64,6 +77,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     NSString * _groupAccessibilityChildren; // voice-over navigation order
     NSString * _testId;// just for auto-test
     
+    BOOL _userInteractionEnabled;
+    BOOL _eventPenetrationEnabled;
     BOOL _accessibilityMagicTapEvent;
     
     /**
@@ -83,6 +98,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     UILongPressGestureRecognizer *_longPressGesture;
     UIPanGestureRecognizer *_panGesture;
     
+    BOOL _cancelsTouchesInView;
+    
     BOOL _listenPanStart;
     BOOL _listenPanMove;
     BOOL _listenPanEnd;
@@ -91,7 +108,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     BOOL _listenVerticalPan;
     
     BOOL _listenStopPropagation;
-    
+    BOOL _customEvent;
+    NSString *_stopPropagationName;
     WXTouchGestureRecognizer* _touchGesture;
     
     /**
@@ -103,9 +121,17 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     WXThreadSafeCounter *_displayCounter;
     
     UIColor *_borderTopColor;
+    UIColor *_darkSchemeBorderTopColor;
+    UIColor *_lightSchemeBorderTopColor;
     UIColor *_borderRightColor;
+    UIColor *_darkSchemeBorderRightColor;
+    UIColor *_lightSchemeBorderRightColor;
     UIColor *_borderLeftColor;
+    UIColor *_darkSchemeBorderLeftColor;
+    UIColor *_lightSchemeBorderLeftColor;
     UIColor *_borderBottomColor;
+    UIColor *_darkSchemeBorderBottomColor;
+    UIColor *_lightSchemeBorderBottomColor;
     
     CGFloat _borderTopWidth;
     CGFloat _borderRightWidth;
@@ -122,10 +148,11 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     WXBorderStyle _borderBottomStyle;
     WXBorderStyle _borderLeftStyle;
     
+    NSInteger _lastBorderRecords; // Records last border drawing
     
+    BOOL _isViewTreeIgnored; // Component is added to super, but it is not added to views.
     BOOL _isFixed;
     BOOL _async;
-    BOOL _isNeedJoinLayoutSystem;
     BOOL _lazyCreateView;
     
     WXTransform *_transform;
@@ -140,6 +167,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     NSString *_repeatIndexIdentify;
     NSString *_repeatLabelIdentify;
     NSString *_virtualComponentId;// for recycleList subcomponent
+    NSMutableDictionary *_virtualElementInfo;
+
     BOOL _isRepeating;
     BOOL _isSkipUpdate;
     BOOL _dataBindOnce;
@@ -148,23 +177,32 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
     NSMutableDictionary<NSString *, WXDataBindingBlock> *_bindingAttributes;
     NSMutableDictionary<NSString *, WXDataBindingBlock> *_bindingStyles;
     NSMutableDictionary<NSString *, WXDataBindingBlock> *_bindingEvents;
+#ifdef __cplusplus
+    std::vector<WXJSExpression *> *_bindingExpressions;
+#endif // __cplusplus
     
     NSMutableDictionary<NSString *, NSArray *> *_eventParameters;
 }
 
-/* _transform may be modified in mutiple threads. DO NOT use "_transform = XXX" directly.
+/* DO NOT use "_transform = XXX" directly.
  Ivar access in ObjC is compiled to code with additional release or retain. So use Ivar in mutiple
  thread may lead to crash. Use an ATOMIC property is well enough. */
 @property (atomic, strong) WXTransform *transform;
+
+/**
+ DO NOT use "_backgroundColor" directly. The same reason as '_transform'.
+ */
+@property (atomic, strong) UIColor* styleBackgroundColor;
+@property (atomic, strong) UIColor* darkSchemeBackgroundColor;
+@property (atomic, strong) UIColor* lightSchemeBackgroundColor;
 
 ///--------------------------------------
 /// @name Package Internal Methods
 ///--------------------------------------
 
 - (void)_layoutDidFinish;
-- (void)_calculateFrameWithSuperAbsolutePosition:(CGPoint)superAbsolutePosition
-                           gatherDirtyComponents:(NSMutableSet<WXComponent *> *)dirtyComponents;
 
+- (void)_layoutPlatform;
 
 - (void)_willDisplayLayer:(CALayer *)layer;
 
@@ -172,10 +210,15 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
 
 - (id<WXScrollerProtocol>)ancestorScroller;
 
-- (void)_insertSubcomponent:(WXComponent *)subcomponent atIndex:(NSInteger)index;
+// return if the component is actually inserted
+- (BOOL)_insertSubcomponent:(WXComponent *)subcomponent atIndex:(NSInteger)index;
+
 - (void)_removeFromSupercomponent;
+- (void)_removeFromSupercomponent:(BOOL)remove;
 - (void)_moveToSupercomponent:(WXComponent *)newSupercomponent atIndex:(NSUInteger)index;
 
+- (BOOL)_isTransitionNone;
+- (BOOL)_hasTransitionPropertyInStyles:(NSDictionary *)styles;
 - (void)_updateStylesOnComponentThread:(NSDictionary *)styles resetStyles:(NSMutableArray *)resetStyles isUpdateStyles:(BOOL)isUpdateStyles;
 - (void)_updateAttributesOnComponentThread:(NSDictionary *)attributes;
 - (void)_updateStylesOnMainThread:(NSDictionary *)styles resetStyles:(NSMutableArray *)resetStyles;
@@ -185,6 +228,8 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
 - (void)_removeEventOnComponentThread:(NSString *)eventName;
 - (void)_addEventOnMainThread:(NSString *)eventName;
 - (void)_removeEventOnMainThread:(NSString *)eventName;
+
+- (void)_collectSubcomponents:(NSMutableArray *)components;
 
 ///--------------------------------------
 /// @name Protected Methods
@@ -196,25 +241,27 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
 
 - (void)_frameDidCalculated:(BOOL)isChanged;
 
-- (NSUInteger)_childrenCountForLayout;
-
 ///--------------------------------------
 /// @name Private Methods
 ///--------------------------------------
+
+- (void)_setRenderObject:(void *)object;
+
+- (BOOL)_isCalculatedFrameChanged:(CGRect)frame;
+
+- (CGFloat)_getInnerContentMainSize;
+
+- (void)_assignInnerContentMainSize:(CGFloat)value;
+
+- (void)_assignCalculatedFrame:(CGRect)frame;
 
 - (void)_modifyStyles:(NSDictionary *)styles;
 
 - (void)_transitionUpdateViewProperty:(NSDictionary *)styles;
 
-- (void)_initCSSNodeWithStyles:(NSDictionary *)styles;
-
-- (void)_initFlexCssNodeWithStyles:(NSDictionary *)styles;
-
 - (void)_updateCSSNodeStyles:(NSDictionary *)styles;
 
 - (void)_resetCSSNodeStyles:(NSArray *)styles;
-
-- (void)_recomputeCSSNodeChildren;
 
 - (void)_handleBorders:(NSDictionary *)styles isUpdating:(BOOL)updating;
 
@@ -258,6 +305,18 @@ typedef id (^WXDataBindingBlock)(NSDictionary *data, BOOL *needUpdate);
 
 - (void)_didInserted;
 
+- (void)attachSlotEvent:(NSDictionary *)data;
+
+- (void)detachSlotEvent:(NSDictionary *)data;
+
+- (void)_buildViewHierarchyLazily;
+
+- (void)_setIsLayoutRTL:(BOOL)isRTL;
+
+- (void)_adjustForRTL;
+
+- (BOOL)_isAffineTypeAs:(NSString *)type;
+
+- (WXBoxShadow*)_chooseBoxShadow;
+
 @end
-
-

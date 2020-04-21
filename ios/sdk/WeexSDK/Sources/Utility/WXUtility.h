@@ -19,10 +19,11 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import "WXDefine.h"
-#import "WXType.h"
-#import "WXLog.h"
-#import "WXSDKInstance.h"
+
+#import <WeexSDK/WXDefine.h>
+#import <WeexSDK/WXType.h>
+#import <WeexSDK/WXLog.h>
+#import <WeexSDK/WXSDKInstance.h>
 
 // The default screen width which helps us to calculate the real size or scale in different devices.
 static const CGFloat WXDefaultScreenWidth = 750.0;
@@ -52,7 +53,7 @@ do {\
 
 #define WX_FREE_FLIST(_ppFree, _count) \
 do {\
-    for(int i = 0; i < _count; i++){\
+    for(int i = 0; i < (_count); i++){\
         if(*(_ppFree + i ) != 0) {\
             free(*(_ppFree + i));\
         }\
@@ -77,9 +78,17 @@ do {\
         WX_ENUMBER_CASE(_invocation, idx, _C_FLT, _obj, float, floatValue, _ppFree)\
         WX_ENUMBER_CASE(_invocation, idx, _C_DBL, _obj, double, doubleValue, _ppFree)\
         WX_ENUMBER_CASE(_invocation, idx, _C_BOOL, _obj, bool, boolValue, _ppFree)\
+        WX_ENUMBER_CASE(_invocation, idx, _C_CHR, _obj, char, charValue, _ppFree)\
         default: { [_invocation setArgument:&_obj atIndex:(idx) + 2]; *(_ppFree + idx) = 0; break;}\
     }\
 }while(0)
+
+#define WXPointEqualToPoint __WXPointEqualToPoint
+CG_INLINE bool
+__WXPointEqualToPoint(CGPoint point1, CGPoint point2)
+{
+    return fabs (point1.x - point2.x) < 0.00001 && fabs (point1.y - point2.y) < 0.00001;
+}
 
 #ifdef __cplusplus
 extern "C" {
@@ -122,14 +131,26 @@ _Nonnull SEL WXSwizzledSelectorForSelector(_Nonnull SEL selector);
 + (void)performBlock:(void (^_Nonnull)(void))block onThread:(NSThread *_Nonnull)thread;
 
 /**
+ * @abstract Check if system is in dark mode.
+ *
+ * @return Boolean
+ *
+ */
++ (BOOL)isSystemInDarkScheme;
+
+/**
  * @abstract Returns the environment of current application, you can get some necessary properties such as appVersion、sdkVersion、appName etc.
  *
  * @return A dictionary object which contains these properties.
  *
  */
 + (NSDictionary *_Nonnull)getEnvironment;
++ (NSDictionary *_Nonnull)getEnvironmentForJSContext;
++ (BOOL)isEnvironmentUsingDarkScheme;
 
 + (NSDictionary *_Nonnull)getDebugEnvironment;
+
++ (WXLayoutDirection)getEnvLayoutDirection;
 
 /**
  * @abstract UserAgent Generation
@@ -148,6 +169,14 @@ _Nonnull SEL WXSwizzledSelectorForSelector(_Nonnull SEL selector);
  *
  */
 + (id _Nullable)objectFromJSON:(NSString * _Nonnull)json;
+
+/**
+ Convert all sub-structure objects of source to immutable container.
+
+ @param source Source object.
+ @return Converted object using immutable container.
+ */
++ (id _Nullable)convertContainerToImmutable:(id _Nullable)source;
 
 #define WXDecodeJson(json)  [WXUtility objectFromJSON:json]
 
@@ -261,6 +290,11 @@ _Nonnull SEL WXSwizzledSelectorForSelector(_Nonnull SEL selector);
  * @discussion If orientation is equal to landscape, the value is caculated as follows: WXScreenSize().height / WXDefaultScreenWidth, otherwise, WXScreenSize().width / WXDefaultScreenWidth.
  */
 + (CGFloat)defaultPixelScaleFactor;
+
+/**
+ * @return true if the device is iPad
+ */
++ (BOOL)deviceIsiPad;
 
 #if defined __cplusplus
 extern "C" {
@@ -483,10 +517,29 @@ BOOL WXFloatGreaterThanWithPrecision(CGFloat a,CGFloat b,double precision);
  */
 + (NSData *_Nonnull)base64DictToData:(NSDictionary *_Nullable)base64Dict;
 
-+ (void)setThreadSafeCollectionUsingLock:(BOOL)usingLock;
+/**
+*  @abstract Switch for RTL.
+*
+*/
++ (void)setEnableRTLLayoutDirection:(BOOL)value;
++ (BOOL)enableRTLLayoutDirection;
 
-+ (BOOL)threadSafeCollectionUsingLock;
+/**
+*  @abstract Switch for dark mode support.
+*
+*/
++ (void)setDarkSchemeSupportEnable:(BOOL)value;
++ (BOOL)isDarkSchemeSupportEnabled;
 
-+ (void)setUnregisterFontWhenCollision:(BOOL)value;
+/**
+*  @abstract Switch for adapt iPad.
+*
+*/
++ (void)setEnableAdaptiveLayout:(BOOL)value;
++ (BOOL)enableAdaptiveLayout;
+
++ (long) getUnixFixTimeMillis;
+
++ (NSArray<NSString *> *_Nullable)extractPropertyNamesOfJSValueObject:(JSValue *_Nullable)jsvalue;
 
 @end
